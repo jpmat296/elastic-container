@@ -1,0 +1,30 @@
+---
+name: CI
+'on':
+  pull_request:
+  push:
+
+jobs:
+
+  tests:
+    name: Integration test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack_version:
+          - 8.7.0
+          - 8.12.2
+          # - 8.13.2  # Buggy at time of package_policy upload
+
+    steps:
+      - name: Check out the codebase.
+        uses: actions/checkout@v2
+
+      - name: Set password for the test
+        run: sed -i 's/changeme/change_me/g' .env
+
+      - name: Set Elastic Stack version to test
+        run: sed -i 's/^STACK_VERSION=.*/STACK_VERSION=${{ matrix.stack_version }}/g' .env
+
+      - name: Run main script
+        run: ./elastic-container.sh start
