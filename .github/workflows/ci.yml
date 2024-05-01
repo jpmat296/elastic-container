@@ -14,7 +14,7 @@ jobs:
         stack_version:
           - 8.7.0
           - 8.12.2
-          # - 8.13.2  # Buggy at time of package_policy upload
+          - 8.13.2  # Buggy at time of package_policy upload
 
     steps:
       - name: Check out the codebase.
