@@ -62,60 +62,60 @@ configure_kbn() {
       echo
       echo "Kibana is up. Proceeding."
       echo
-      output=$(curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPOST "${LOCAL_KBN_URL}/api/detection_engine/index")
-      [[ ${output} =~ '"acknowledged":true' ]] || (
-        echo
-        echo "Detection Engine setup failed :-("
-        exit 1
-      )
+      # output=$(curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPOST "${LOCAL_KBN_URL}/api/detection_engine/index")
+      # [[ ${output} =~ '"acknowledged":true' ]] || (
+      #   echo
+      #   echo "Detection Engine setup failed :-("
+      #   exit 1
+      # )
 
-      echo "Detection engine enabled. Installing prepackaged rules."
-      curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${LOCAL_KBN_URL}/api/detection_engine/rules/prepackaged" 1>&2
+      # echo "Detection engine enabled. Installing prepackaged rules."
+      # curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${LOCAL_KBN_URL}/api/detection_engine/rules/prepackaged" 1>&2
 
-      echo
-      echo "Prepackaged rules installed!"
-      echo
-      if [[ "${LinuxDR}" -eq 0 && "${WindowsDR}" -eq 0 && "${MacOSDR}" -eq 0 ]]; then
-        echo "No detection rules enabled in the .env file, skipping detection rules enablement."
-        echo
-        break
-      else
-        echo "Enabling detection rules"
-        if [ "${LinuxDR}" -eq 1 ]; then
+      # echo
+      # echo "Prepackaged rules installed!"
+      # echo
+      # if [[ "${LinuxDR}" -eq 0 && "${WindowsDR}" -eq 0 && "${MacOSDR}" -eq 0 ]]; then
+      #   echo "No detection rules enabled in the .env file, skipping detection rules enablement."
+      #   echo
+      #   break
+      # else
+      #   echo "Enabling detection rules"
+      #   if [ "${LinuxDR}" -eq 1 ]; then
 
-          curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -X POST "${LOCAL_KBN_URL}/api/detection_engine/rules/_bulk_action" -d'
-            {
-              "query": "alert.attributes.tags: (\"Linux\" OR \"OS: Linux\")",
-              "action": "enable"
-            }
-            ' 1>&2
-          echo
-          echo "Successfully enabled Linux detection rules"
-        fi
-        if [ "${WindowsDR}" -eq 1 ]; then
+      #     curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -X POST "${LOCAL_KBN_URL}/api/detection_engine/rules/_bulk_action" -d'
+      #       {
+      #         "query": "alert.attributes.tags: (\"Linux\" OR \"OS: Linux\")",
+      #         "action": "enable"
+      #       }
+      #       ' 1>&2
+      #     echo
+      #     echo "Successfully enabled Linux detection rules"
+      #   fi
+      #   if [ "${WindowsDR}" -eq 1 ]; then
 
-          curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -X POST "${LOCAL_KBN_URL}/api/detection_engine/rules/_bulk_action" -d'
-            {
-              "query": "alert.attributes.tags: (\"Windows\" OR \"OS: Windows\")",
-              "action": "enable"
-            }
-            ' 1>&2
-          echo
-          echo "Successfully enabled Windows detection rules"
-        fi
-        if [ "${MacOSDR}" -eq 1 ]; then
+      #     curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -X POST "${LOCAL_KBN_URL}/api/detection_engine/rules/_bulk_action" -d'
+      #       {
+      #         "query": "alert.attributes.tags: (\"Windows\" OR \"OS: Windows\")",
+      #         "action": "enable"
+      #       }
+      #       ' 1>&2
+      #     echo
+      #     echo "Successfully enabled Windows detection rules"
+      #   fi
+      #   if [ "${MacOSDR}" -eq 1 ]; then
 
-          curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -X POST "${LOCAL_KBN_URL}/api/detection_engine/rules/_bulk_action" -d'
-            {
-              "query": "alert.attributes.tags: (\"macOS\" OR \"OS: macOS\")",
-              "action": "enable"
-            }
-            ' 1>&2
-          echo
-          echo "Successfully enabled MacOS detection rules"
-        fi
-      fi
-      echo
+      #     curl -k --silent "${HEADERS[@]}" --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -X POST "${LOCAL_KBN_URL}/api/detection_engine/rules/_bulk_action" -d'
+      #       {
+      #         "query": "alert.attributes.tags: (\"macOS\" OR \"OS: macOS\")",
+      #         "action": "enable"
+      #       }
+      #       ' 1>&2
+      #     echo
+      #     echo "Successfully enabled MacOS detection rules"
+      #   fi
+      # fi
+      # echo
       break
     else
       echo
@@ -144,9 +144,9 @@ set_fleet_values() {
   printf '{"hosts": ["%s"]}' "https://${ipvar}:9200" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/outputs/fleet-default-output" -d @- | jq
   printf '{"ca_trusted_fingerprint": "%s"}' "${fingerprint}" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/outputs/fleet-default-output" -d @- | jq
   printf '{"config_yaml": "%s"}' "ssl.verification_mode: certificate" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPUT "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/outputs/fleet-default-output" -d @- | jq
-  policy_id=$(printf '{"name": "%s", "description": "%s", "namespace": "%s", "monitoring_enabled": ["logs","metrics"], "inactivity_timeout": 1209600}' "Endpoint Policy" "" "default" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPOST "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/agent_policies?sys_monitoring=true" -d @- | jq -r '.item.id')
-  pkg_version=$(curl -k --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XGET "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/epm/packages/endpoint" -d : | jq -r '.item.version')
-  printf "{\"name\": \"%s\", \"description\": \"%s\", \"namespace\": \"%s\", \"policy_id\": \"%s\", \"enabled\": %s, \"inputs\": [{\"enabled\": true, \"streams\": [], \"type\": \"ENDPOINT_INTEGRATION_CONFIG\", \"config\": {\"_config\": {\"value\": {\"type\": \"endpoint\", \"endpointConfig\": {\"preset\": \"EDRComplete\"}}}}}], \"package\": {\"name\": \"endpoint\", \"title\": \"Elastic Defend\", \"version\": \"${pkg_version}\"}}" "Elastic Defend" "" "default" "${policy_id}" "true" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPOST "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/package_policies" -d @- | jq
+  # policy_id=$(printf '{"name": "%s", "description": "%s", "namespace": "%s", "monitoring_enabled": ["logs","metrics"], "inactivity_timeout": 1209600}' "Endpoint Policy" "" "default" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPOST "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/agent_policies?sys_monitoring=true" -d @- | jq -r '.item.id')
+  # pkg_version=$(curl -k --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XGET "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/epm/packages/endpoint" -d : | jq -r '.item.version')
+  # printf "{\"name\": \"%s\", \"description\": \"%s\", \"namespace\": \"%s\", \"policy_id\": \"%s\", \"enabled\": %s, \"inputs\": [{\"enabled\": true, \"streams\": [], \"type\": \"ENDPOINT_INTEGRATION_CONFIG\", \"config\": {\"_config\": {\"value\": {\"type\": \"endpoint\", \"endpointConfig\": {\"preset\": \"EDRComplete\"}}}}}], \"package\": {\"name\": \"endpoint\", \"title\": \"Elastic Defend\", \"version\": \"${pkg_version}\"}}" "Elastic Defend" "" "default" "${policy_id}" "true" | curl -k --silent --user "${ELASTIC_USERNAME}:${ELASTIC_PASSWORD}" -XPOST "${HEADERS[@]}" "${LOCAL_KBN_URL}/api/fleet/package_policies" -d @- | jq
 }
 
 clear_documents() {
