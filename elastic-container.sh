@@ -191,9 +191,9 @@ else
 fi
 
 if docker compose >/dev/null; then
-  COMPOSE="docker compose"
+  COMPOSE="docker compose --progress quiet"
 elif command -v docker-compose >/dev/null; then
-  COMPOSE="docker-compose"
+  COMPOSE="docker-compose --progress quiet"
 else
   echo "elastic-container requires docker compose!"
   exit 2
