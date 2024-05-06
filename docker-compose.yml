@@ -132,6 +132,9 @@ services:
       - SERVER_SSL_CERTIFICATE=config/certs/kibana/kibana.crt
       - SERVER_SSL_KEY=config/certs/kibana/kibana.key
       - SERVER_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
+      - XPACK_FLEET_ISAIRGAPPED=true
+      - XPACK_FLEET_REGISTRYURL=http://ecp-epr:8080
+
     mem_limit: ${MEM_LIMIT}
     healthcheck:
       test:
@@ -172,6 +175,22 @@ services:
         - FLEET_SERVER_CERT_KEY=/certs/fleet-server/fleet-server.key
         - FLEET_SERVER_ELASTICSEARCH_CA=/certs/ca/ca.crt
         - KIBANA_FLEET_CA=/certs/ca/ca.crt
+
+  epr:
+      platform: linux/amd64
+      depends_on:
+        kibana:
+          condition: service_healthy
+        elasticsearch:
+          condition: service_healthy
+      image: docker.elastic.co/package-registry/distribution:${STACK_VERSION}
+      container_name: ecp-epr
+      ports:
+        - 8080:8080
+      restart: always
+      user: root
+      environment:
+        - EPR_ADDRESS=0.0.0.0:8080
 
 volumes:
   certs:
