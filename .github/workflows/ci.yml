@@ -28,3 +28,13 @@ jobs:
 
       - name: Run main script
         run: ./elastic-container.sh start
+
+      - name: DEBUG kibana
+        if: always()
+        run: |
+          docker volume ls
+          docker ps
+          echo Logs Kibana
+          docker logs ecp-kibana
+          echo Logs ES
+          docker logs ecp-elasticsearch

@@ -144,7 +144,7 @@ services:
         ]
       interval: 10s
       timeout: 10s
-      retries: 120
+      retries: 30  # FIXME tmp
 
   fleet-server:
       depends_on:
