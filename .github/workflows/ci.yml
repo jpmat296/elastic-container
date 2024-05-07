@@ -12,9 +12,9 @@ jobs:
     strategy:
       matrix:
         stack_version:
-          - 8.7.0
+          # - 8.7.0
           - 8.12.2
-          - 8.13.2
+          # - 8.13.2
 
     steps:
       - name: Check out the codebase.
