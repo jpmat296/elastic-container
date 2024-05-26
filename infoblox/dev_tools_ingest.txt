@@ -1,0 +1,1296 @@
+# 4 pipelines
+GET _ingest/pipeline?filter_path=*.description
+
+# Kibana > Dev Tools > Settings > Disable "Use triple quotes in output"
+
+#GET _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_audit
+PUT _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_audit
+{
+  "description": "Pipeline for parsing Infoblox NIOS Audit logs.",
+  "processors": [
+    {
+      "grok": {
+        "field": "message",
+        "if": "ctx.message.contains('Created') || ctx.message.contains('Modified') || ctx.message.contains('Deleted')",
+        "patterns": [
+          "^%{GREEDYDATA:_tmp.timestamp} \\[%{DATA:user.name}\\]: %{DATA:event.action} %{DATA:infoblox_nios.log.audit.object.name} %{DATA:infoblox_nios.log.audit.object.value}:? %{GREEDYDATA:infoblox_nios.log.audit.message}$",
+          "^%{GREEDYDATA:_tmp.timestamp} \\[%{DATA:user.name}\\]: %{DATA:event.action} %{GREEDYDATA:infoblox_nios.log.audit.message}$",
+          "^%{GREEDYDATA:infoblox_nios.log.audit.message}$"
+        ]
+      }
+    },
+    {
+      "grok": {
+        "field": "message",
+        "if": "ctx.message.contains('Called')",
+        "patterns": [
+          "^%{GREEDYDATA:_tmp.timestamp} \\[%{DATA:user.name}\\]: %{DATA:event.action} - %{WORD:infoblox_nios.log.audit.object.name}:? %{GREEDYDATA:infoblox_nios.log.audit.message}$",
+          "^%{GREEDYDATA:_tmp.timestamp} \\[%{DATA:user.name}\\]: %{DATA:event.action} - %{GREEDYDATA:infoblox_nios.log.audit.message}$",
+          "^%{GREEDYDATA:infoblox_nios.log.audit.message}$"
+        ]
+      }
+    },
+    {
+      "grok": {
+        "field": "message",
+        "if": "ctx.event?.action == null",
+        "patterns": [
+          "^%{GREEDYDATA:_tmp.timestamp} \\[%{DATA:user.name}\\]: %{DATA:event.action} - - %{GREEDYDATA:details}$",
+          "^%{GREEDYDATA:_tmp.timestamp} \\[%{DATA:user.name}\\]: %{DATA:event.action} %{GREEDYDATA:infoblox_nios.log.audit.message}$",
+          "^%{GREEDYDATA:_tmp.timestamp} %{GREEDYDATA:infoblox_nios.log.audit.message}$",
+          "^%{GREEDYDATA:infoblox_nios.log.audit.message}$"
+        ]
+      }
+    },
+    {
+      "date": {
+        "field": "_tmp.timestamp",
+        "target_field": "_tmp.timestamp",
+        "if": "ctx._tmp?.timestamp != null",
+        "formats": [
+          "dd-MMM-yyyy HH:mm:ss.SSS",
+          "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        ],
+        "on_failure": [
+          {
+            "remove": {
+              "field": "_tmp.timestamp",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kv": {
+        "field": "details",
+        "target_field": "audit",
+        "field_split": " ",
+        "value_split": "=",
+        "ignore_missing": true
+      }
+    },
+    {
+      "lowercase": {
+        "field": "event.action",
+        "if": "ctx.event?.action != null",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "event.outcome",
+        "if": "ctx.event?.action == 'login_allowed'",
+        "value": "success",
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "event.type",
+        "if": "ctx.event?.action == 'login_allowed'",
+        "value": "start",
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "event.category",
+        "if": "ctx.event?.action == 'login_allowed'",
+        "value": "authentication",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "event.outcome",
+        "if": "ctx.event?.action == 'login_denied'",
+        "value": "failure",
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "event.category",
+        "if": "ctx.event?.action == 'login_denied'",
+        "value": "authentication",
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "event.type",
+        "if": "ctx.event?.action == 'logout'",
+        "value": "end",
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "event.category",
+        "if": "ctx.event?.action == 'logout'",
+        "value": "authentication",
+        "ignore_failure": true
+      }
+    },
+    {
+      "script": {
+        "description": "Add kv fields under the infoblox_nios.log.audit.",
+        "lang": "painless",
+        "if": "ctx.audit != null",
+        "source": "if (ctx.infoblox_nios == null) {\n  ctx['infoblox_nios'] = new HashMap();\n}\nif (ctx.infoblox_nios.log == null) {\n  ctx.infoblox_nios['log'] = new HashMap();\n}\nif (ctx.infoblox_nios.log.audit == null) {\n  ctx.infoblox_nios.log['audit'] = new HashMap();\n}\nfor (Map.Entry m : ctx.audit.entrySet()) {\n  def value = m.getValue();\n  if (value instanceof String) {\n    value = value.replace('\\\\040', ' ')\n  }\n  ctx.infoblox_nios.log.audit[m.getKey()] = value;\n}\n"
+      }
+    },
+    {
+      "convert": {
+        "field": "infoblox_nios.log.audit.ip",
+        "if": "ctx.infoblox_nios?.log?.audit?.ip != null && ctx.infoblox_nios.log.audit.ip != ''",
+        "type": "ip",
+        "ignore_missing": true,
+        "on_failure": [
+          {
+            "remove": {
+              "field": "infoblox_nios.log.audit.ip",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "append": {
+        "field": "related.ip",
+        "value": "{{{infoblox_nios.log.audit.ip}}}",
+        "if": "ctx.infoblox_nios?.log?.audit?.ip != null",
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    },
+    {
+      "gsub": {
+        "field": "user.name",
+        "ignore_missing": true,
+        "pattern": "\\\\040",
+        "replacement": " "
+      }
+    },
+    {
+      "remove": {
+        "field": [
+          "details",
+          "audit"
+        ],
+        "ignore_missing": true
+      }
+    },
+    {
+      "append": {
+        "field": "related.user",
+        "value": "{{{user.name}}}",
+        "if": "ctx.user?.name != null",
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    }
+  ],
+  "on_failure": [
+    {
+      "set": {
+        "field": "event.kind",
+        "value": "pipeline_error"
+      }
+    },
+    {
+      "append": {
+        "field": "error.message",
+        "value": "{{{ _ingest.on_failure_message }}}"
+      }
+    }
+  ],
+  "_meta": {
+    "managed_by": "fleet",
+    "managed": true,
+    "package": {
+      "name": "infoblox_nios"
+    }
+  }
+}
+
+
+#GET _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_dns
+PUT _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_dns
+{
+  "description": "Pipeline for parsing Infoblox NIOS DNS logs.",
+  "processors": [
+    {
+      "grok": {
+        "field": "message",
+        "patterns": [
+          "^zone %{DATA:dns.question.name}/%{DATA:dns.question.class}: notify from %{IP:client.ip}#%{NUMBER:client.port:long}:? %{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^transfer of '%{DATA:dns.question.name}/%{DATA:dns.question.class}' from %{IP:client.ip}#%{NUMBER:client.port:long}:? %{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^validating %{DATA:dns.question.name}/%{WORD:dns.question.type}: %{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{CLIENT} updating zone '%{DATA:dns.question.name}/%{DATA:dns.question.class}': %{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{CLIENT} \\(%{DATA}\\): %{VIEW}?query failed %{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{CLIENT} \\(%{DATA:infoblox_nios.log.dns.before_query}\\): rewriting query name %{DATA} to '%{DATA:infoblox_nios.log.dns.after_query}', type %{DATA:dns.question.type}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{CLIENT} \\(%{DATA}\\): %{VIEW}?query: %{DATA:dns.question.name} %{DATA:dns.question.class} %{WORD:dns.question.type} %{DATA:infoblox_nios.log.dns.header_flags} \\(%{IP:server.ip}\\)$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{CLIENT} %{DATA:network.transport}: %{VIEW}?query: %{DATA:dns.question.name} %{DATA:dns.question.class} %{WORD:dns.question.type} response: %{DATA:dns.response_code} %{DATA:infoblox_nios.log.dns.header_flags}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{CLIENT} \\(%{DATA}\\): transfer of '%{DATA:dns.question.name}/%{DATA:dns.question.class}': %{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*CEF:0\\|Infoblox\\|NIOS\\|%{GREEDYDATA:infoblox_nios.log.dns.version}\\|RPZ-%{DATA:dns.answers.type}\\|%{DATA:infoblox_nios.log.dns.answers_policy}\\|\\d+\\|app=DNS dst=%{IP:server.ip} src=%{IP:client.ip} spt=%{NUMBER:client.port:long} view=%{DATA:infoblox_nios.log.dns.view_name} qtype=%{WORD:dns.question.type} msg=%{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{GREEDYDATA:_tmp.timestamp} %{CLIENT} %{DATA:network.transport}: %{VIEW}?query: %{DATA:dns.question.name} %{DATA:dns.question.class} %{WORD:dns.question.type} response: %{DATA:dns.response_code} %{DATA:infoblox_nios.log.dns.header_flags} %{GREEDYDATA:repeat_message}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{GREEDYDATA:_tmp.timestamp} %{CLIENT} %{DATA:network.transport}: %{VIEW}?query: %{DATA:dns.question.name} %{DATA:dns.question.class} %{WORD:dns.question.type} response: %{DATA:dns.response_code} %{DATA:infoblox_nios.log.dns.header_flags}$",
+          "^(%{NOTSPACE:infoblox_nios.log.dns.category}:)?\\s*%{CLIENT} %{GREEDYDATA:infoblox_nios.log.dns.message}$",
+          "^%{GREEDYDATA:infoblox_nios.log.dns.message}$"
+        ],
+        "pattern_definitions": {
+          "CLIENT": "client (?:%{DATA} )?%{IP:client.ip}#%{NUMBER:client.port:long}:?",
+          "VIEW": "view %{DATA:infoblox_nios.log.view}: "
+        }
+      }
+    },
+    {
+      "date": {
+        "field": "_tmp.timestamp",
+        "target_field": "_tmp.timestamp",
+        "if": "ctx._tmp?.timestamp != null && ctx.event?.timezone != null",
+        "timezone": "{{{event.timezone}}}",
+        "formats": [
+          "dd-MMM-yyyy HH:mm:ss.SSS",
+          "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        ],
+        "on_failure": [
+          {
+            "remove": {
+              "field": "_tmp.timestamp",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "date": {
+        "field": "_tmp.timestamp",
+        "target_field": "_tmp.timestamp",
+        "if": "ctx._tmp?.timestamp != null && ctx.event?.timezone == null",
+        "formats": [
+          "dd-MMM-yyyy HH:mm:ss.SSS",
+          "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        ],
+        "on_failure": [
+          {
+            "remove": {
+              "field": "_tmp.timestamp",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "script": {
+        "lang": "painless",
+        "if": "ctx.repeat_message != null",
+        "description": "Process dns.answers data by splitting repeat_message by ';'\nand then each of the elements by space. It takes into account\nquoted strings.\n",
+        "source": "def splitUnquoted(String input, String sep) {\n  def tokens = [];\n  def startPosition = 0;\n  def isInQuotes = false;\n  char quote = (char)\"\\\"\";\n  for (def currentPosition = 0; currentPosition < input.length(); currentPosition++) {\n      if (input.charAt(currentPosition) == quote) {\n          isInQuotes = !isInQuotes;\n      }\n      else if (input.charAt(currentPosition) == (char)sep && !isInQuotes) {\n          def token = input.substring(startPosition, currentPosition).trim();\n          if (!token.equals(\"\")) {\n            tokens.add(token);\n          }\n          startPosition = currentPosition + 1;\n      }\n  }\n\n  def lastToken = input.substring(startPosition);\n  if (!lastToken.equals(sep) && !lastToken.equals(\"\")) {\n      tokens.add(lastToken.trim());\n  }\n  return tokens;\n}\n\ndef arr = splitUnquoted(ctx.repeat_message, \";\");\nctx.repeat_message = arr;\nMap map = new HashMap();\nmap.put('name', new ArrayList());\nmap.put('ttl', new ArrayList());\nmap.put('class', new ArrayList());\nmap.put('type', new ArrayList());\nmap.put('data', new ArrayList());\n\nfor (def i = 0; i < arr.length; i++) {\n  def response = splitUnquoted(arr[i], \" \");\n  if (response.size() >= 4) {\n    map['name'].add(response[0]);\n    map['ttl'].add(response[1]);\n    map['class'].add(response[2]);\n    map['type'].add(response[3]);\n    map['data'].addAll(response.subList(4, response.length));\n  }\n}\nctx.dns.answers = map;\n"
+      }
+    },
+    {
+      "gsub": {
+        "field": "infoblox_nios.log.dns.message",
+        "pattern": "\"",
+        "replacement": "",
+        "if": "ctx.infoblox_nios?.log?.dns?.message != null"
+      }
+    },
+    {
+      "dissect": {
+        "field": "infoblox_nios.log.dns.message",
+        "pattern": "rpz %{infoblox_nios.log.dns.rpz.rule_type} %{infoblox_nios.log.dns.rpz.query_class} %{infoblox_nios.log.dns.rpz.action} %{infoblox_nios.log.dns.rpz.domain} %{infoblox_nios.log.dns.rpz.query_class_rewrite} via %{infoblox_nios.log.dns.rpz.domain_rewrite} CAT=%{infoblox_nios.log.dns.rpz.type}",
+        "ignore_failure": true,
+        "if": "ctx.infoblox_nios?.log?.dns?.message != null"
+      }
+    },
+    {
+      "convert": {
+        "field": "dns.answers.ttl",
+        "type": "long",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "script": {
+        "description": "Remove last Full Stop('.') from `dns.answers.data` field.",
+        "lang": "painless",
+        "if": "ctx.dns?.answers?.data instanceof List",
+        "source": "def hash = new ArrayList();\nfor(data in ctx.dns.answers.data){\n  def n = data.length();\n  if(data.charAt(n-1).toString() == '.'){\n    def data_substring = data.substring(0,n-1) + data.substring(n);\n    hash.add(data_substring);\n  }\n  else{\n    hash.add(data);\n  }\n}\nctx.dns.answers.data = hash;\n"
+      }
+    },
+    {
+      "script": {
+        "description": "Remove last Full Stop('.') from `dns.answers.name` field.",
+        "lang": "painless",
+        "if": "ctx.dns?.answers?.name instanceof List",
+        "source": "def hash = new ArrayList();\nfor(name in ctx.dns.answers.name){\n  def n = name.length();\n  if(name.charAt(n-1).toString() == '.'){\n    def name_substring = name.substring(0,n-1) + name.substring(n);\n    hash.add(name_substring);\n  }\n  else{\n    hash.add(name);\n  }\n}\nctx.dns.answers.name = hash;\n"
+      }
+    },
+    {
+      "foreach": {
+        "field": "dns.answers.data",
+        "if": "ctx.dns?.answers?.data != null",
+        "processor": {
+          "grok": {
+            "field": "_ingest._value",
+            "patterns": [
+              "^%{IP:related.ip}$",
+              "^%{HOSTNAME:related.hosts}$"
+            ],
+            "ignore_failure": true
+          }
+        }
+      }
+    },
+    {
+      "convert": {
+        "field": "client.ip",
+        "if": "ctx.client?.ip != null && ctx.client.ip != ''",
+        "type": "ip",
+        "ignore_missing": true,
+        "on_failure": [
+          {
+            "remove": {
+              "field": "client.ip",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "append": {
+        "field": "related.ip",
+        "value": "{{{client.ip}}}",
+        "if": "ctx.client?.ip != null",
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    },
+    {
+      "convert": {
+        "field": "server.ip",
+        "if": "ctx.server?.ip != null && ctx.server.ip != ''",
+        "type": "ip",
+        "ignore_missing": true,
+        "on_failure": [
+          {
+            "remove": {
+              "field": "server.ip",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "append": {
+        "field": "related.ip",
+        "value": "{{{server.ip}}}",
+        "if": "ctx.server?.ip != null",
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    },
+    {
+      "foreach": {
+        "field": "dns.answers.name",
+        "if": "ctx.dns?.answers?.name != null",
+        "processor": {
+          "append": {
+            "field": "related.hosts",
+            "value": "{{_ingest._value}}",
+            "allow_duplicates": false,
+            "ignore_failure": true
+          }
+        }
+      }
+    },
+    {
+      "append": {
+        "field": "related.hosts",
+        "value": "{{{dns.question.name}}}",
+        "if": "ctx.dns?.question?.name != null",
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    },
+    {
+      "script": {
+        "lang": "painless",
+        "if": "ctx.infoblox_nios?.log?.dns?.header_flags != null && ctx.infoblox_nios.log.dns.header_flags != ''",
+        "params": {
+          "A": "AA",
+          "t": "TC",
+          "C": "CD",
+          "D": "DO"
+        },
+        "source": "ArrayList hf = new ArrayList();\nfor (entry in params.entrySet()) {\n  if (ctx.infoblox_nios.log.dns.header_flags.contains(entry.getKey())) {\n    hf.add(entry.getValue());\n  }\n}\nif (ctx.dns?.response_code != null && ctx.dns.response_code != '') {\n  if (ctx.infoblox_nios.log.dns.header_flags.contains('+')) {\n    hf.add('RA')\n  }\n} else {\n  if (ctx.infoblox_nios.log.dns.header_flags.contains('+')) {\n    hf.add('RD')\n  }\n}\nif (hf.length == 0) {\n  return;\n}\nif (ctx.dns == null) {\n  HashMap hm = new HashMap();\n  ctx.put('dns', hm);\n}\nctx.dns.put('header_flags', hf);\n"
+      }
+    },
+    {
+      "registered_domain": {
+        "field": "dns.question.name",
+        "target_field": "dns.question",
+        "if": "ctx.dns?.question != null"
+      }
+    },
+    {
+      "remove": {
+        "field": [
+          "repeat_message",
+          "dns.question.domain"
+        ],
+        "ignore_missing": true
+      }
+    }
+  ],
+  "on_failure": [
+    {
+      "set": {
+        "field": "event.kind",
+        "value": "pipeline_error"
+      }
+    },
+    {
+      "append": {
+        "field": "error.message",
+        "value": "{{{ _ingest.on_failure_message }}}"
+      }
+    }
+  ],
+  "_meta": {
+    "managed_by": "fleet",
+    "managed": true,
+    "package": {
+      "name": "infoblox_nios"
+    }
+  }
+}
+
+#GET _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_dhcp
+PUT _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_dhcp
+{
+    "description": "Pipeline for parsing Infoblox NIOS DHCP logs.",
+    "processors": [
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPDISCOVER')",
+          "patterns": [
+            "^%{WORD:event.action} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id}: network %{DATA:infoblox_nios.log.dhcp.network}: %{GREEDYDATA:infoblox_nios.log.dhcp.discover.message}$",
+            "^%{WORD:event.action} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{GREEDYDATA:infoblox_nios.log.dhcp.trans_id}$",
+            "^%{WORD:event.action} from %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} from %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{GREEDYDATA:infoblox_nios.log.dhcp.trans_id}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPOFFER')",
+          "patterns": [
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} offered-duration %{NUMBER:infoblox_nios.log.dhcp.offered.duration:long} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} offered-duration %{GREEDYDATA:infoblox_nios.log.dhcp.offered.duration:long}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} offered-duration %{GREEDYDATA:infoblox_nios.log.dhcp.offered.duration:long} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} offered-duration %{GREEDYDATA:infoblox_nios.log.dhcp.offered.duration:long}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{GREEDYDATA:infoblox_nios.log.dhcp.lease.duration:long}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPREQUEST')",
+          "patterns": [
+            "^%{WORD:event.action} for %{IP:client.ip} \\(%{IP:infoblox_nios.log.dhcp.router.ip}\\) from %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{DATA:infoblox_nios.log.dhcp.uid} \\(%{GREEDYDATA:infoblox_nios.log.dhcp.lease.message}\\)$",
+            "^%{WORD:event.action} for %{IP:client.ip} from %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{DATA:infoblox_nios.log.dhcp.uid} \\(%{GREEDYDATA:infoblox_nios.log.dhcp.lease.message}\\)$",
+            "^%{WORD:event.action} for %{IP:client.ip} from %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{DATA:infoblox_nios.log.dhcp.uid}: %{GREEDYDATA:infoblox_nios.log.dhcp.request.message}$",
+            "^%{WORD:event.action} for %{IP:client.ip} \\(%{IP:infoblox_nios.log.dhcp.router.ip}\\) from %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} for %{IP:client.ip} \\(%{IP:infoblox_nios.log.dhcp.router.ip}\\) from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} \\(%{GREEDYDATA:infoblox_nios.log.dhcp.lease.message}\\)$",
+            "^%{WORD:event.action} for %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{DATA:infoblox_nios.log.dhcp.uid} \\(%{GREEDYDATA:infoblox_nios.log.dhcp.lease.message}\\)$",
+            "^%{WORD:event.action} for %{IP:client.ip} \\(%{IP:infoblox_nios.log.dhcp.router.ip}\\) from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id}: %{GREEDYDATA:infoblox_nios.log.dhcp.request.message}$",
+            "^%{WORD:event.action} for %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id}: %{GREEDYDATA:infoblox_nios.log.dhcp.request.message}$",
+            "^%{WORD:event.action} for %{IP:client.ip} \\(%{IP:infoblox_nios.log.dhcp.router.ip}\\) from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{GREEDYDATA:infoblox_nios.log.dhcp.trans_id}$",
+            "^%{WORD:event.action} for %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} for %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{GREEDYDATA:infoblox_nios.log.dhcp.trans_id}$",
+            "^%{WORD:event.action} for %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name})$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPACK')",
+          "patterns": [
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} offered-duration %{NUMBER:infoblox_nios.log.dhcp.offered.duration:long} \\(%{DATA:infoblox_nios.log.dhcp.message}\\) uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} offered-duration %{NUMBER:infoblox_nios.log.dhcp.offered.duration:long} \\(%{DATA:infoblox_nios.log.dhcp.message}\\) uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} \\(%{DATA:infoblox_nios.log.dhcp.lease.message}\\) uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} offered-duration %{NUMBER:infoblox_nios.log.dhcp.offered.duration:long} \\(%{DATA:infoblox_nios.log.dhcp.message}\\)$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} \\(%{DATA:infoblox_nios.log.dhcp.lease.message}\\) uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} \\(%{DATA:infoblox_nios.log.dhcp.lease.message}\\)$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} \\(%{GREEDYDATA:infoblox_nios.log.dhcp.lease.message}\\)$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{GREEDYDATA:infoblox_nios.log.dhcp.lease.duration:long}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{NUMBER:infoblox_nios.log.dhcp.lease.duration:long} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) relay (%{IP:infoblox_nios.log.dhcp.relay.interface.ip}|%{WORD:infoblox_nios.log.dhcp.relay.interface.name}) lease-duration %{GREEDYDATA:infoblox_nios.log.dhcp.lease.duration:long}$",
+            "^%{WORD:event.action} to %{IP:client.ip} \\(%{MAC:client.mac}\\) via %{WORD:observer.ingress.interface.name}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('RELEASE')",
+          "patterns": [
+            "^%{WORD:event.action} of %{IP:client.ip} from %{MAC:client.mac} \\(%{DATA:infoblox_nios.log.dhcp.client_hostname}\\) via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) \\(%{DATA:infoblox_nios.log.dhcp.release.info}\\) TransID %{DATA:infoblox_nios.log.dhcp.trans_id} uid %{GREEDYDATA:infoblox_nios.log.dhcp.uid}$",
+            "^%{WORD:event.action} of %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) \\(%{DATA:infoblox_nios.log.dhcp.release.info}\\) TransID %{GREEDYDATA:infoblox_nios.log.dhcp.trans_id}$",
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPEXPIRE')",
+          "patterns": [
+            "^%{WORD:event.action} on %{IP:client.ip} to %{GREEDYDATA:client.mac}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPINFORM')",
+          "patterns": [
+            "^%{WORD:event.action} from %{IP:client.ip} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id}: %{GREEDYDATA:infoblox_nios.log.dhcp.inform.message}$",
+            "^%{WORD:event.action} from %{IP:client.ip} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{GREEDYDATA:infoblox_nios.log.dhcp.trans_id}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPDECLINE')",
+          "patterns": [
+            "^%{WORD:event.action} of %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}) TransID %{DATA:infoblox_nios.log.dhcp.trans_id}: %{GREEDYDATA:infoblox_nios.log.dhcp.decline.message}$",
+            "^%{WORD:event.action} of %{IP:client.ip} from %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name}): %{GREEDYDATA:infoblox_nios.log.dhcp.decline.message}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPNAK')",
+          "patterns": [
+            "^%{WORD:event.action} on %{IP:client.ip} to %{MAC:client.mac} via (%{IP:infoblox_nios.log.dhcp.interface.ip}|%{WORD:observer.ingress.interface.name})$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('DHCPLEASEQUERY')",
+          "patterns": [
+            "^%{WORD:event.action} from %{IP:client.ip}: %{GREEDYDATA:infoblox_nios.log.dhcp.lease_query.message}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('Encapsulated Solicit')",
+          "patterns": [
+            "^%{DATA:event.action} message from %{IP:client.ip} port %{NUMBER:client.port:long} from client DUID %{GREEDYDATA:infoblox_nios.log.dhcp.duid}, transaction ID %{GREEDYDATA:infoblox_nios.log.dhcp.trans_id}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('Advertise NA')",
+          "patterns": [
+            "^%{DATA:event.action}: address %{IP:client.ip} to client with duid %{GREEDYDATA:infoblox_nios.log.dhcp.duid} iaid = -%{GREEDYDATA:infoblox_nios.log.dhcp.iaid} valid for %{NUMBER:infoblox_nios.log.dhcp.validation_second:long} seconds$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('Relay-forward')",
+          "patterns": [
+            "^%{DATA:event.action} message from %{IP:client.ip} port %{NUMBER:client.port:long}, link address %{IP:infoblox_nios.log.dhcp.link_address}, peer address %{IP:infoblox_nios.log.dhcp.peer_address}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('Encapsulating Advertise')",
+          "patterns": [
+            "^%{DATA:event.action} message to send to %{IP:client.ip} port %{NUMBER:client.port:long}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.message.contains('Sending Relay-reply')",
+          "patterns": [
+            "^%{DATA:event.action} message to %{IP:client.ip} port %{NUMBER:client.port:long}$",
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "grok": {
+          "field": "message",
+          "if": "ctx.event?.action == null",
+          "patterns": [
+            "^%{GREEDYDATA:infoblox_nios.log.dhcp.message}$"
+          ]
+        }
+      },
+      {
+        "lowercase": {
+          "field": "event.action",
+          "ignore_failure": true,
+          "ignore_missing": true
+        }
+      },
+      {
+        "gsub": {
+          "field": "client.mac",
+          "ignore_missing": true,
+          "pattern": "[-:.]",
+          "replacement": "-"
+        }
+      },
+      {
+        "uppercase": {
+          "field": "client.mac",
+          "ignore_missing": true
+        }
+      },
+      {
+        "convert": {
+          "field": "client.ip",
+          "if": "ctx.client?.ip != null && ctx.client.ip != ''",
+          "type": "ip",
+          "ignore_missing": true,
+          "on_failure": [
+            {
+              "remove": {
+                "field": "client.ip",
+                "ignore_missing": true
+              }
+            },
+            {
+              "append": {
+                "field": "error.message",
+                "value": "{{{_ingest.on_failure_message}}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "append": {
+          "field": "related.ip",
+          "value": "{{{client.ip}}}",
+          "if": "ctx.client?.ip != null",
+          "allow_duplicates": false,
+          "ignore_failure": true
+        }
+      },
+      {
+        "convert": {
+          "field": "infoblox_nios.log.dhcp.link_address",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.link_address != null && ctx.infoblox_nios.log.dhcp.link_address != ''",
+          "type": "ip",
+          "ignore_missing": true,
+          "on_failure": [
+            {
+              "remove": {
+                "field": "infoblox_nios.log.dhcp.link_address",
+                "ignore_missing": true
+              }
+            },
+            {
+              "append": {
+                "field": "error.message",
+                "value": "{{{_ingest.on_failure_message}}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "append": {
+          "field": "related.ip",
+          "value": "{{{infoblox_nios.log.dhcp.link_address}}}",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.link_address != null",
+          "allow_duplicates": false,
+          "ignore_failure": true
+        }
+      },
+      {
+        "convert": {
+          "field": "infoblox_nios.log.dhcp.peer_address",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.peer_address != null && ctx.infoblox_nios.log.dhcp.peer_address != ''",
+          "type": "ip",
+          "ignore_missing": true,
+          "on_failure": [
+            {
+              "remove": {
+                "field": "infoblox_nios.log.dhcp.peer_address",
+                "ignore_missing": true
+              }
+            },
+            {
+              "append": {
+                "field": "error.message",
+                "value": "{{{_ingest.on_failure_message}}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "append": {
+          "field": "related.ip",
+          "value": "{{{infoblox_nios.log.dhcp.peer_address}}}",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.peer_address != null",
+          "allow_duplicates": false,
+          "ignore_failure": true
+        }
+      },
+      {
+        "convert": {
+          "field": "infoblox_nios.log.dhcp.router.ip",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.router?.ip != null && ctx.infoblox_nios.log.dhcp.router.ip != ''",
+          "type": "ip",
+          "ignore_missing": true,
+          "on_failure": [
+            {
+              "remove": {
+                "field": "infoblox_nios.log.dhcp.router.ip",
+                "ignore_missing": true
+              }
+            },
+            {
+              "append": {
+                "field": "error.message",
+                "value": "{{{_ingest.on_failure_message}}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "append": {
+          "field": "related.ip",
+          "value": "{{{infoblox_nios.log.dhcp.router.ip}}}",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.router?.ip != null",
+          "allow_duplicates": false,
+          "ignore_failure": true
+        }
+      },
+      {
+        "convert": {
+          "field": "infoblox_nios.log.dhcp.interface.ip",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.interface?.ip != null && ctx.infoblox_nios.log.dhcp.interface.ip != ''",
+          "type": "ip",
+          "ignore_missing": true,
+          "on_failure": [
+            {
+              "remove": {
+                "field": "infoblox_nios.log.dhcp.interface.ip",
+                "ignore_missing": true
+              }
+            },
+            {
+              "append": {
+                "field": "error.message",
+                "value": "{{{_ingest.on_failure_message}}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "append": {
+          "field": "related.ip",
+          "value": "{{{infoblox_nios.log.dhcp.interface.ip}}}",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.interface?.ip != null",
+          "allow_duplicates": false,
+          "ignore_failure": true
+        }
+      },
+      {
+        "convert": {
+          "field": "infoblox_nios.log.dhcp.relay.interface.ip",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.relay?.interface?.ip != null && ctx.infoblox_nios.log.dhcp.relay.interface.ip != ''",
+          "type": "ip",
+          "ignore_missing": true,
+          "on_failure": [
+            {
+              "remove": {
+                "field": "infoblox_nios.log.dhcp.relay.interface.ip",
+                "ignore_missing": true
+              }
+            },
+            {
+              "append": {
+                "field": "error.message",
+                "value": "{{{_ingest.on_failure_message}}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "append": {
+          "field": "related.ip",
+          "value": "{{{infoblox_nios.log.dhcp.relay.interface.ip}}}",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.relay?.interface?.ip != null",
+          "allow_duplicates": false,
+          "ignore_failure": true
+        }
+      },
+      {
+        "append": {
+          "field": "related.hosts",
+          "value": "{{{infoblox_nios.log.dhcp.client_hostname}}}",
+          "if": "ctx.infoblox_nios?.log?.dhcp?.client_hostname != null",
+          "allow_duplicates": false,
+          "ignore_failure": true
+        }
+      }
+    ],
+    "on_failure": [
+      {
+        "set": {
+          "field": "event.kind",
+          "value": "pipeline_error"
+        }
+      },
+      {
+        "append": {
+          "field": "error.message",
+          "value": "{{{ _ingest.on_failure_message }}}"
+        }
+      }
+    ],
+    "_meta": {
+      "managed_by": "fleet",
+      "managed": true,
+      "package": {
+        "name": "infoblox_nios"
+      }
+    }
+  }
+
+
+GET _ingest/pipeline/logs-infoblox_nios.log-1.21.0
+PUT _ingest/pipeline/logs-infoblox_nios.log-1.21.0
+{
+  "description": "Pipeline for parsing Infoblox NIOS logs.",
+  "processors": [
+    {
+      "rename": {
+        "field": "message",
+        "target_field": "event.original",
+        "ignore_missing": true,
+        "if": "ctx.event?.original == null"
+      }
+    },
+    {
+      "set": {
+        "field": "ecs.version",
+        "value": "8.11.0"
+      }
+    },
+    {
+      "grok": {
+        "field": "event.original",
+        "patterns": [
+          """^<%{NUMBER:log.syslog.priority:long}>%{SYSLOGTIMESTAMP:event.created}\s+%{NOTSPACE:host.domain}\s+%{IP:_tmp.host.ip}\s+%{DATA:infoblox_nios.log.service_name}\[?%{NUMBER:process.pid:long}?\]?:\s+%{GREEDYDATA:message}$""",
+          """^<%{NUMBER:log.syslog.priority:long}>%{SYSLOGTIMESTAMP:event.created}\s+(%{IP:_tmp.host.ip}|%{NOTSPACE:host.domain})\s+%{DATA:infoblox_nios.log.service_name}\[?%{NUMBER:process.pid:long}?\]?:\s+%{GREEDYDATA:message}$""",
+          "^%{GREEDYDATA:message}$"
+        ]
+      }
+    },
+    {
+      "rename": {
+        "field": "_conf.tz_offset",
+        "target_field": "event.timezone",
+        "if": "ctx._conf?.tz_offset != null && ctx._conf.tz_offset != 'local'",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "date": {
+        "field": "event.created",
+        "timezone": "{{{event.timezone}}}",
+        "if": "ctx.event?.timezone != null",
+        "target_field": "event.created",
+        "formats": [
+          "MMM  d HH:mm:ss",
+          "MMM dd HH:mm:ss",
+          "MMM d HH:mm:ss",
+          "dd-MMM-yyyy HH:mm:ss.SSS"
+        ],
+        "on_failure": [
+          {
+            "remove": {
+              "field": "event.created",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "date": {
+        "field": "event.created",
+        "if": "ctx.event?.timezone == null",
+        "target_field": "event.created",
+        "formats": [
+          "MMM  d HH:mm:ss",
+          "MMM dd HH:mm:ss",
+          "MMM d HH:mm:ss",
+          "dd-MMM-yyyy HH:mm:ss.SSS"
+        ],
+        "on_failure": [
+          {
+            "remove": {
+              "field": "event.created",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "set": {
+        "field": "infoblox_nios.log.type",
+        "value": "DHCP",
+        "if": "ctx.infoblox_nios?.log?.service_name == 'dhcpd' || ctx.infoblox_nios?.log?.service_name == 'dhcpdv6'"
+      }
+    },
+    {
+      "set": {
+        "field": "infoblox_nios.log.type",
+        "value": "DNS",
+        "if": "ctx.infoblox_nios?.log?.service_name == 'named'"
+      }
+    },
+    {
+      "set": {
+        "field": "infoblox_nios.log.type",
+        "value": "AUDIT",
+        "if": "ctx.infoblox_nios?.log?.service_name == 'httpd'"
+      }
+    },
+    {
+      "pipeline": {
+        "name": "logs-infoblox_nios.log-1.21.0-pipeline_audit",
+        "if": "ctx.infoblox_nios?.log?.type == 'AUDIT'"
+      }
+    },
+    {
+      "pipeline": {
+        "name": "logs-infoblox_nios.log-1.21.0-pipeline_dhcp",
+        "if": "ctx.infoblox_nios?.log?.type == 'DHCP'"
+      }
+    },
+    {
+      "pipeline": {
+        "name": "logs-infoblox_nios.log-1.21.0-pipeline_dns",
+        "if": "ctx.infoblox_nios?.log?.type == 'DNS'"
+      }
+    },
+    {
+      "set": {
+        "field": "@timestamp",
+        "value": "{{{event.created}}}",
+        "if": "ctx.event?.created != null",
+        "override": true
+      }
+    },
+    {
+      "set": {
+        "field": "@timestamp",
+        "value": "{{{_tmp.timestamp}}}",
+        "if": "ctx._tmp?.timestamp != null",
+        "override": true
+      }
+    },
+    {
+      "convert": {
+        "field": "_tmp.host.ip",
+        "if": "ctx._tmp?.host?.ip != null && ctx._tmp.host.ip != ''",
+        "type": "ip",
+        "ignore_missing": true,
+        "on_failure": [
+          {
+            "remove": {
+              "field": "_tmp.host.ip",
+              "ignore_missing": true
+            }
+          },
+          {
+            "append": {
+              "field": "error.message",
+              "value": "{{{_ingest.on_failure_message}}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "append": {
+        "field": "related.ip",
+        "value": "{{{_tmp.host.ip}}}",
+        "if": "ctx._tmp?.host?.ip != null",
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "related.hosts",
+        "value": "{{{host.domain}}}",
+        "if": "ctx.host?.domain != null",
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "host.ip",
+        "value": "{{{_tmp.host.ip}}}",
+        "if": "ctx._tmp?.host?.ip != null",
+        "ignore_failure": true
+      }
+    },
+    {
+      "lowercase": {
+        "field": "event.action",
+        "if": "ctx.event?.action != null",
+        "ignore_failure": true
+      }
+    },
+    {
+      "geoip": {
+        "field": "client.ip",
+        "target_field": "client.geo",
+        "if": "ctx.client?.geo == null && ctx.client?.ip != null",
+        "ignore_missing": true
+      }
+    },
+    {
+      "geoip": {
+        "database_file": "GeoLite2-ASN.mmdb",
+        "field": "client.ip",
+        "target_field": "client.as",
+        "properties": [
+          "asn",
+          "organization_name"
+        ],
+        "ignore_missing": true,
+        "if": "ctx.client?.ip != null"
+      }
+    },
+    {
+      "rename": {
+        "field": "client.as.asn",
+        "target_field": "client.as.number",
+        "ignore_missing": true,
+        "if": "ctx.client?.as?.asn != null"
+      }
+    },
+    {
+      "rename": {
+        "field": "client.as.organization_name",
+        "target_field": "client.as.organization.name",
+        "ignore_missing": true,
+        "if": "ctx.client?.as?.organization_name != null"
+      }
+    },
+    {
+      "dissect": {
+        "field": "network.transport",
+        "pattern": "view %{}: %{network.transport}",
+        "if": "ctx.network?.transport instanceof String && ctx.network.transport.contains('view')"
+      }
+    },
+    {
+      "lowercase": {
+        "field": "network.transport",
+        "ignore_missing": true
+      }
+    },
+    {
+      "script": {
+        "description": "Drops null/empty values recursively.",
+        "lang": "painless",
+        "source": """boolean drop(Object o) {
+  if (o == null || o == '') {
+    return true;
+  } else if (o instanceof Map) {
+    ((Map) o).values().removeIf(v -> drop(v));
+    return (((Map) o).size() == 0);
+  } else if (o instanceof List) {
+    ((List) o).removeIf(v -> drop(v));
+    return (((List) o).length == 0);
+  }
+  return false;
+}
+drop(ctx);
+"""
+      }
+    },
+    {
+      "remove": {
+        "field": "event.original",
+        "if": "ctx.tags == null || !(ctx.tags.contains('preserve_original_event'))",
+        "ignore_failure": true,
+        "ignore_missing": true
+      }
+    },
+    {
+      "remove": {
+        "field": [
+          "_conf",
+          "_tmp"
+        ],
+        "ignore_failure": true,
+        "ignore_missing": true
+      }
+    },
+    {
+      "pipeline": {
+        "name": "global@custom",
+        "ignore_missing_pipeline": true,
+        "description": "[Fleet] Global pipeline for all data streams"
+      }
+    },
+    {
+      "pipeline": {
+        "name": "logs@custom",
+        "ignore_missing_pipeline": true,
+        "description": "[Fleet] Pipeline for all data streams of type `logs`"
+      }
+    },
+    {
+      "pipeline": {
+        "name": "logs-infoblox_nios.integration@custom",
+        "ignore_missing_pipeline": true,
+        "description": "[Fleet] Pipeline for all data streams of type `logs` defined by the `infoblox_nios` integration"
+      }
+    },
+    {
+      "pipeline": {
+        "name": "logs-infoblox_nios.log@custom",
+        "ignore_missing_pipeline": true,
+        "description": "[Fleet] Pipeline for the `infoblox_nios.log` dataset"
+      }
+    }
+  ],
+  "on_failure": [
+    {
+      "append": {
+        "field": "error.message",
+        "value": "{{{_ingest.on_failure_message}}}"
+      }
+    },
+    {
+      "set": {
+        "field": "event.kind",
+        "value": "pipeline_error"
+      }
+    }
+  ],
+  "_meta": {
+    "managed_by": "fleet",
+    "managed": true,
+    "package": {
+      "name": "infoblox_nios"
+    }
+  }
+}
