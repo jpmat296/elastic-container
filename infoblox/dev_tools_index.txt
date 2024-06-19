@@ -1,4 +1,7 @@
-GET _index_template?filter_path=*.name
+# After below commands, 1 index template + 1 component template exist
+# To check:
+GET _index_template/*-infoblox_nios.*?filter_path=*.name
+GET _component_template/*-infoblox_nios.*?filter_path=*.name
 
 GET _index_template/logs-infoblox_nios.log
 PUT _index_template/logs-infoblox_nios.log
@@ -43,8 +46,6 @@ PUT _index_template/logs-infoblox_nios.log
   ]
 }
 
-
-GET _component_template/*infoblox_nios*?filter_path=*.name
 GET _component_template/logs-infoblox_nios.log@package
 PUT _component_template/logs-infoblox_nios.log@package
 {

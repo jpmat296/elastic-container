@@ -1,9 +1,8 @@
-# 4 pipelines
-GET _ingest/pipeline?filter_path=*.description
+# After below commands, 4 pipelines exist
+# To check:
+GET _ingest/pipeline/*-infoblox_nios.*?filter_path=*.description
 
-# Kibana > Dev Tools > Settings > Disable "Use triple quotes in output"
-
-#GET _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_audit
+GET _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_audit
 PUT _ingest/pipeline/logs-infoblox_nios.log-1.21.0-pipeline_audit
 {
   "description": "Pipeline for parsing Infoblox NIOS Audit logs.",
