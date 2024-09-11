@@ -8,7 +8,7 @@ jobs:
 
   tests:
     name: Integration test
-    runs-on: ubuntu-latest-large
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         stack_version:
