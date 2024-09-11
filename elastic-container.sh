@@ -219,11 +219,6 @@ case "${ACTION}" in
 
   configure_kbn 1>&2 2>&3
 
-  echo "Waiting 40 seconds for Fleet Server setup."
-  echo
-
-  sleep 40
-
   echo "Populating Fleet Settings."
   set_fleet_values > /dev/null 2>&1
   echo

@@ -148,6 +148,8 @@ services:
 
   fleet-server:
       depends_on:
+        epr:
+          condition: service_healthy
         kibana:
           condition: service_healthy
         elasticsearch:
@@ -175,14 +177,18 @@ services:
         - FLEET_SERVER_CERT_KEY=/certs/fleet-server/fleet-server.key
         - FLEET_SERVER_ELASTICSEARCH_CA=/certs/ca/ca.crt
         - KIBANA_FLEET_CA=/certs/ca/ca.crt
+      healthcheck:
+        test:
+          [
+            "CMD-SHELL",
+            "curl -s -k https://localhost:8220 | grep -q 404",
+          ]
+        interval: 10s
+        timeout: 10s
+        retries: 120
 
   epr:
       platform: linux/amd64
-      depends_on:
-        kibana:
-          condition: service_healthy
-        elasticsearch:
-          condition: service_healthy
       image: docker.elastic.co/package-registry/distribution:${STACK_VERSION}
       container_name: ecp-epr
       ports:
@@ -191,6 +197,15 @@ services:
       user: root
       environment:
         - EPR_ADDRESS=0.0.0.0:8080
+      healthcheck:
+        test:
+          [
+            "CMD-SHELL",
+            "curl -s http://localhost:8080 | grep -q 'package-registry'",
+          ]
+        interval: 10s
+        timeout: 10s
+        retries: 120
 
 volumes:
   certs:
