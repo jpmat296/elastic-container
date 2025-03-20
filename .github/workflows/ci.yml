@@ -14,7 +14,8 @@ jobs:
         stack_version:
           - 8.7.0
           - 8.12.2
-          - 8.13.2
+          - 8.17.3
+          - 9.0.0-SNAPSHOT
 
     steps:
       - name: Check out the codebase.
