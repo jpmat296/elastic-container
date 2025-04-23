@@ -192,9 +192,9 @@ else
 fi
 
 if docker compose >/dev/null; then
-  COMPOSE="docker compose --progress quiet"
+  COMPOSE="docker compose"
 elif command -v docker-compose >/dev/null; then
-  COMPOSE="docker-compose --progress quiet"
+  COMPOSE="docker-compose"
 else
   echo "elastic-container requires docker compose!"
   exit 2
@@ -218,7 +218,7 @@ case "${ACTION}" in
 
   ${COMPOSE} up -d --no-deps 
 
-  configure_kbn 1>&2 2>&3
+  configure_kbn
 
   echo "Waiting 40 seconds for Fleet Server setup."
   echo
@@ -226,7 +226,7 @@ case "${ACTION}" in
   sleep 40
 
   echo "Populating Fleet Settings."
-  set_fleet_values > /dev/null 2>&1
+  set_fleet_values
   echo
 
   echo "READY SET GO!"
