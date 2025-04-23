@@ -149,7 +149,7 @@ services:
           condition: service_healthy
         elasticsearch:
           condition: service_healthy
-      image: docker.elastic.co/beats/elastic-agent:${STACK_VERSION}
+      image: docker.elastic.co/elastic-agent/elastic-agent-slim:${STACK_VERSION}
       container_name: ecp-fleet-server
       volumes:
         - certs:/certs:z
